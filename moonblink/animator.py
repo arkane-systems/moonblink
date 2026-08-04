@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import asyncio
 import time
+from dataclasses import dataclass
 from typing import Protocol
 
 from .renderer import RenderedFrame
@@ -27,7 +27,7 @@ def _lerp(a: float, b: float, t: float) -> float:
 
 
 def _blend_pixel(start: tuple[int, int, int], end: tuple[int, int, int], t: float) -> tuple[int, int, int]:
-    return tuple(int(round(_lerp(sa, ea, t))) for sa, ea in zip(start, end, strict=True))
+    return tuple(round(_lerp(sa, ea, t)) for sa, ea in zip(start, end, strict=True))
 
 
 @dataclass(slots=True)
@@ -43,6 +43,10 @@ class FrameAnimator:
         self._config = config or AnimationConfig()
         self._last_emit = 0.0
         self._last_frame: RenderedFrame | None = None
+
+    @property
+    def max_hz(self) -> float:
+        return self._config.max_hz
 
     async def present(self, frame: RenderedFrame, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now

@@ -7,6 +7,19 @@ name = "moonblink"
 version = "0.1.0"
 description = "Moonraker/Klipper Blinkt! status display service"
 requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.9",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Real Raspberry Pi GPIO hardware access. Required in production (main.py
+# fails fast if it's missing when not run with --simulate), but kept as an
+# optional extra so the rest of the package installs and tests cleanly on
+# non-Pi development/CI machines.
+hardware = [
+    "blinkt>=0.1.2",
+]
 
 [tool.setuptools]
 packages = ["moonblink"]

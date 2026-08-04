@@ -28,9 +28,18 @@ class IntegrationFlowTests(unittest.TestCase):
         self.assertNotEqual(paused.pixels[7], (0, 0, 0))
 
         state.clear_all_alerts()
-        state.add_alert("crit", kind="heater", severity=ALERT_CRITICAL)
+        state.add_alert("crit", kind="heater", severity=ALERT_CRITICAL, now=1.0)
         critical = render_frame(state, RenderConfig(), now=1.0)
-        self.assertTrue(all(pixel == critical.pixels[0] for pixel in critical.pixels))
+        # A freshly-raised critical alert should blink the pixel-7 indicator,
+        # not immediately take over the whole strip -- that's reserved for
+        # printer_mode == error or an alert that's escalated after being
+        # left unacknowledged.
+        self.assertEqual(critical.mode, "critical-alert")
+        self.assertFalse(all(pixel == critical.pixels[0] for pixel in critical.pixels))
+
+        escalated = render_frame(state, RenderConfig(), now=1.0 + RenderConfig().critical_alert_escalate_after_s)
+        self.assertEqual(escalated.mode, "critical")
+        self.assertTrue(all(pixel == escalated.pixels[0] for pixel in escalated.pixels))
 
 
 if __name__ == "__main__":

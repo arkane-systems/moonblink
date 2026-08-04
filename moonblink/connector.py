@@ -5,18 +5,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 try:  # pragma: no cover - optional dependency
     import aiohttp
-except Exception:  # pragma: no cover - optional dependency
+except ImportError:  # pragma: no cover - optional dependency
     aiohttp = None
 
 from .state import PrinterState
-
 
 StateHandler = Callable[[PrinterState], Awaitable[None] | None]
 
@@ -48,7 +48,12 @@ class MoonrakerConnector:
     async def refresh_snapshot(self) -> None:
         try:
             payload = await asyncio.to_thread(self._fetch_snapshot)
-        except Exception:
+        except (OSError, ValueError):
+            # Network failures (OSError, including urllib's URLError/timeout
+            # subclasses) or malformed JSON responses (ValueError, including
+            # json.JSONDecodeError) shouldn't crash the connector -- REST
+            # snapshots are a best-effort sanity check, retried on the next
+            # poll/reconnect.
             return
 
         result = payload.get("result", payload)
@@ -60,7 +65,7 @@ class MoonrakerConnector:
     def _fetch_snapshot(self) -> dict[str, Any]:
         query = urlencode({name: "" for name in self.config.objects})
         request = Request(f"{self.config.rest_url.rstrip('/')}/printer/objects/query?{query}")
-        with urlopen(request, timeout=5) as response:  # noqa: S310 - local Moonraker service
+        with urlopen(request, timeout=5) as response:
             return json.loads(response.read().decode("utf-8"))
 
     async def _run_forever(self) -> None:
@@ -69,7 +74,8 @@ class MoonrakerConnector:
             try:
                 await self._ws_session()
                 delay = self.config.reconnect_delay
-            except Exception:
+            except Exception:  # noqa: BLE001 - top-level reconnect loop: any failure (network,
+                # protocol, or otherwise) must trigger backoff+retry rather than crash the service.
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self.config.max_reconnect_delay)
 
@@ -79,20 +85,19 @@ class MoonrakerConnector:
             await self.refresh_snapshot()
             return
 
-        async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(self.config.websocket_url, heartbeat=20) as ws:
-                await self._subscribe(ws)
-                poll_task = asyncio.create_task(self._poll_loop())
-                try:
-                    async for message in ws:
-                        if self._stop_event.is_set():
-                            break
-                        if message.type == aiohttp.WSMsgType.TEXT:
-                            self._handle_message(message.data)
-                finally:
-                    poll_task.cancel()
-                    with contextlib.suppress(Exception):
-                        await poll_task
+        async with aiohttp.ClientSession() as session, session.ws_connect(self.config.websocket_url, heartbeat=20) as ws:
+            await self._subscribe(ws)
+            poll_task = asyncio.create_task(self._poll_loop())
+            try:
+                async for message in ws:
+                    if self._stop_event.is_set():
+                        break
+                    if message.type == aiohttp.WSMsgType.TEXT:
+                        self._handle_message(message.data)
+            finally:
+                poll_task.cancel()
+                with contextlib.suppress(Exception):
+                    await poll_task
 
     async def _poll_loop(self) -> None:
         while not self._stop_event.is_set():

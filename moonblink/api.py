@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Callable
+from typing import Any
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -29,7 +30,7 @@ class ControlCallbacks:
 class _RequestHandler(BaseHTTPRequestHandler):
     callbacks: ControlCallbacks = ControlCallbacks()
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
         try:
@@ -64,7 +65,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
         _json_response(self, 404, {"error": "not-found"})
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
+    def log_message(self, format: str, *args: Any) -> None:
         return
 
 

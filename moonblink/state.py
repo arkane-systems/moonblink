@@ -6,10 +6,9 @@ exercise the LED logic without needing Moonraker or Blinkt hardware.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import time
+from dataclasses import dataclass, field
 from typing import Any
-
 
 PrinterMode = str
 AlertSeverity = str
@@ -44,6 +43,11 @@ class Alert:
     acknowledged: bool = False
     active: bool = True
     created_at: float = field(default_factory=time.monotonic)
+    # Normalized 0..1 magnitude (e.g. how far a temperature is off-target
+    # relative to the critical threshold) used by the renderer to scale
+    # indicator brightness. 0 means "just crossed into alert", 1 means
+    # "at or beyond the critical threshold".
+    magnitude: float = 0.0
 
 
 @dataclass(slots=True)
@@ -99,12 +103,26 @@ class PrinterState:
         kind: str,
         severity: AlertSeverity,
         message: str = "",
+        now: float | None = None,
     ) -> None:
+        existing = self.alerts.get(alert_id)
+        if existing is not None:
+            # Refresh an already-outstanding alert in place so its
+            # `created_at` (used for critical-escalation timing) and any
+            # user acknowledgement are preserved across repeated updates
+            # for the same still-ongoing condition.
+            existing.kind = kind
+            existing.severity = severity
+            existing.message = message
+            existing.active = True
+            return
+
         self.alerts[alert_id] = Alert(
             alert_id=alert_id,
             kind=kind,
             severity=severity,
             message=message,
+            created_at=time.monotonic() if now is None else now,
         )
 
     def acknowledge_alert(self, alert_id: str) -> None:
@@ -134,6 +152,54 @@ class PrinterState:
     @property
     def active_alerts(self) -> list[Alert]:
         return [alert for alert in self.alerts.values() if alert.active and not alert.acknowledged]
+
+    @property
+    def active_critical_alerts(self) -> list[Alert]:
+        return [alert for alert in self.active_alerts if alert.severity == ALERT_CRITICAL]
+
+    def oldest_critical_alert_age(self, now: float | None = None) -> float | None:
+        """Seconds since the longest-outstanding unacknowledged critical alert was raised."""
+        active = self.active_critical_alerts
+        if not active:
+            return None
+        now = time.monotonic() if now is None else now
+        oldest_created_at = min(alert.created_at for alert in active)
+        return max(0.0, now - oldest_created_at)
+
+    def indicator_magnitude(self) -> float:
+        """Peak normalized magnitude across all active, unacknowledged alerts."""
+        active = self.active_alerts
+        if not active:
+            return 0.0
+        return max(alert.magnitude for alert in active)
+
+    def evaluate_temperature_alerts(self, *, warning_c: float, critical_c: float, now: float | None = None) -> None:
+        """Raise or clear ``heater-<name>`` alerts from recorded temperature readings.
+
+        A heater is only evaluated when it has a positive target (i.e. it is
+        actively being heated) -- an idle/off heater cooling toward ambient
+        should not be flagged as "off-target".
+        """
+        for name, reading in self.temperatures.items():
+            alert_id = f"heater-{name}"
+            if reading.actual is None or reading.target is None or reading.target <= 0:
+                self.clear_alert(alert_id)
+                continue
+
+            delta = abs(reading.actual - reading.target)
+            if critical_c > 0:
+                magnitude = max(0.0, min(1.0, delta / critical_c))
+            else:
+                magnitude = 1.0 if delta > 0 else 0.0
+
+            if delta >= critical_c:
+                self.add_alert(alert_id, kind="heater", severity=ALERT_CRITICAL, message=f"{name} off-target by {delta:.1f}C", now=now)
+                self.alerts[alert_id].magnitude = magnitude
+            elif delta >= warning_c:
+                self.add_alert(alert_id, kind="heater", severity=ALERT_WARNING, message=f"{name} off-target by {delta:.1f}C", now=now)
+                self.alerts[alert_id].magnitude = magnitude
+            else:
+                self.clear_alert(alert_id)
 
     def update_from_status(self, payload: dict[str, Any]) -> None:
         state = payload.get("state") or payload.get("printer_state") or payload.get("status")

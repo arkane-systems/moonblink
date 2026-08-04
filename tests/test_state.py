@@ -31,6 +31,44 @@ class StateModelTests(unittest.TestCase):
         state.clear_alert("runout")
         self.assertEqual(state.active_alerts, [])
 
+    def test_temperature_threshold_generates_and_clears_warning_alert(self) -> None:
+        state = PrinterState()
+        state.set_temperature("extruder", actual=210.0, target=200.0)  # 10C off, within warning band
+        state.evaluate_temperature_alerts(warning_c=5.0, critical_c=15.0)
+        self.assertTrue(state.has_warning_alert)
+        self.assertFalse(state.has_critical_alert)
+        self.assertIn("heater-extruder", state.alerts)
+        self.assertAlmostEqual(state.alerts["heater-extruder"].magnitude, 10.0 / 15.0, places=3)
+
+        state.set_temperature("extruder", actual=200.0, target=200.0)  # back on target
+        state.evaluate_temperature_alerts(warning_c=5.0, critical_c=15.0)
+        self.assertFalse(state.has_warning_alert)
+        self.assertNotIn("heater-extruder", state.alerts)
+
+    def test_temperature_threshold_generates_critical_alert(self) -> None:
+        state = PrinterState()
+        state.set_temperature("heater_bed", actual=140.0, target=110.0)  # 30C off
+        state.evaluate_temperature_alerts(warning_c=5.0, critical_c=15.0)
+        self.assertTrue(state.has_critical_alert)
+        self.assertEqual(state.alerts["heater-heater_bed"].magnitude, 1.0)
+
+    def test_heater_with_zero_target_is_not_flagged(self) -> None:
+        state = PrinterState()
+        state.set_temperature("heater_bed", actual=35.0, target=0.0)  # heater off, cooling down
+        state.evaluate_temperature_alerts(warning_c=5.0, critical_c=15.0)
+        self.assertFalse(state.has_warning_alert)
+        self.assertFalse(state.has_critical_alert)
+
+    def test_reasserting_alert_preserves_created_at_and_acknowledgement(self) -> None:
+        state = PrinterState()
+        state.add_alert("runout", kind="filament", severity=ALERT_WARNING, now=1.0)
+        state.acknowledge_alert("runout")
+        # Same underlying condition re-reported later shouldn't reset the
+        # alert's age or un-acknowledge it.
+        state.add_alert("runout", kind="filament", severity=ALERT_WARNING, now=50.0)
+        self.assertEqual(state.alerts["runout"].created_at, 1.0)
+        self.assertTrue(state.alerts["runout"].acknowledged)
+
 
 if __name__ == "__main__":
     unittest.main()

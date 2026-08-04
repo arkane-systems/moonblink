@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 import time
+from dataclasses import dataclass
 
 from .state import (
     PRINTER_ERROR,
     PRINTER_IDLE,
     PRINTER_PAUSED,
     PRINTER_PRINTING,
-    PrinterState,
     RGB,
+    PrinterState,
 )
-
 
 BLACK: RGB = (0, 0, 0)
 WHITE: RGB = (255, 255, 255)
@@ -37,6 +36,7 @@ class RenderConfig:
     disable_layer_flash: bool = False
     progress_start_color: RGB = CYAN
     progress_end_color: RGB = MAGENTA
+    critical_alert_escalate_after_s: float = 30.0
 
 
 @dataclass(slots=True)
@@ -56,18 +56,23 @@ def _lerp(a: float, b: float, t: float) -> float:
 
 def _blend_color(start: RGB, end: RGB, t: float) -> RGB:
     t = _clamp(t)
-    return tuple(int(round(_lerp(sa, ea, t))) for sa, ea in zip(start, end, strict=True))
+    return tuple(round(_lerp(sa, ea, t)) for sa, ea in zip(start, end, strict=True))
 
 
 def _scale_color(color: RGB, factor: float) -> RGB:
     factor = _clamp(factor)
-    return tuple(int(round(channel * factor)) for channel in color)
+    return tuple(round(channel * factor) for channel in color)
 
 
 def _pulse(now: float, period: float = 1.2, minimum: float = 0.25, maximum: float = 1.0) -> float:
     phase = (now % period) / period
     wave = 0.5 - 0.5 * math.cos(phase * math.tau)
     return _lerp(minimum, maximum, wave)
+
+
+def _blink_on(now: float, period: float = 0.5, duty: float = 0.5) -> bool:
+    phase = (now % period) / period
+    return phase < duty
 
 
 def _spark_index(now: float, width: int = 6, speed: float = 2.0) -> int:
@@ -77,7 +82,16 @@ def _spark_index(now: float, width: int = 6, speed: float = 2.0) -> int:
 def render_frame(state: PrinterState, config: RenderConfig, now: float | None = None) -> RenderedFrame:
     now = time.monotonic() if now is None else now
 
-    if state.printer_mode == PRINTER_ERROR or state.has_critical_alert:
+    # Priority 1: critical *error* (thermal runaway, PSU fail, e-stop) is
+    # always an immediate full-strip strobe, with no escalation delay.
+    # Priority 2: critical *alerts* (filament runout, high-temp off-target)
+    # start as a pixel-7 blink (handled further below) and only escalate to
+    # the same full-strip strobe once left unacknowledged past the
+    # configured threshold.
+    critical_alert_age = state.oldest_critical_alert_age(now)
+    critical_alert_escalated = critical_alert_age is not None and critical_alert_age >= config.critical_alert_escalate_after_s
+
+    if state.printer_mode == PRINTER_ERROR or critical_alert_escalated:
         pulse = _pulse(now, period=0.4, minimum=0.55, maximum=1.0)
         pixels = tuple(_scale_color(config.critical_color, pulse) for _ in range(8))
         return RenderedFrame(pixels=pixels, brightness=config.brightness_max, mode="critical")
@@ -121,7 +135,7 @@ def render_frame(state: PrinterState, config: RenderConfig, now: float | None = 
 
     elif state.printer_mode == PRINTER_PAUSED:
         pixels[0] = config.paused_color
-        fill = int(round(_clamp(state.progress) * 6.0))
+        fill = round(_clamp(state.progress) * 6.0)
         for index in range(fill):
             pixels[index + 1] = _blend_color(config.progress_start_color, config.progress_end_color, index / 5 if 5 else 0.0)
     elif state.printer_mode == PRINTER_IDLE:
@@ -130,10 +144,19 @@ def render_frame(state: PrinterState, config: RenderConfig, now: float | None = 
         for index in range(1, 7):
             pixels[index] = _scale_color(config.idle_color, breathe * (0.7 if index % 2 else 0.4))
     else:
-        pixels[0] = config.error_color if state.printer_mode == PRINTER_ERROR else config.idle_color
+        pixels[0] = config.idle_color
 
-    if state.has_warning_alert:
+    # Priority 2 (continued): an unescalated critical alert overlays a hard
+    # blink on pixel 7, taking precedence over the (lower priority, priority
+    # 3) warning pulse. Brightness scales with how far off-target the
+    # underlying reading is (0..1 normalized magnitude).
+    if state.has_critical_alert:
+        magnitude = state.indicator_magnitude()
+        pixels[7] = _scale_color(config.critical_color, max(0.4, magnitude)) if _blink_on(now, period=0.5, duty=0.5) else BLACK
+        mode = "critical-alert"
+    elif state.has_warning_alert:
+        magnitude = state.indicator_magnitude()
         pulse = _pulse(now, period=1.6, minimum=0.15, maximum=1.0)
-        pixels[7] = _scale_color(config.warning_color, pulse)
+        pixels[7] = _scale_color(config.warning_color, pulse * max(0.4, magnitude) if magnitude else pulse)
 
     return RenderedFrame(pixels=tuple(pixels), brightness=config.brightness_max, mode=mode)
