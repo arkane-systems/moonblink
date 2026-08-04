@@ -1,0 +1,26 @@
+moonraker:
+  url: ws://127.0.0.1/websocket
+  rest_url: http://127.0.0.1
+
+api:
+  bind_address: 127.0.0.1
+  port: 8765
+
+brightness_max: 0.35
+update_rate_hz: 15
+flash_duration_ms: 300
+
+colors:
+  printing: [0, 255, 0]
+  idle: [0, 0, 255]
+  paused: [255, 255, 0]
+  error: [255, 0, 0]
+
+temp_thresholds:
+  warning_c: 5
+  critical_c: 15
+
+night_mode:
+  enabled: false
+  dim_to: 0.1
+
