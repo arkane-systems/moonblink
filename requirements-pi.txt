@@ -1,0 +1,7 @@
+# Combined requirements for a full Raspberry Pi deployment (base deps +
+# the hardware extra). Used by `make venv` when WITH_HARDWARE=1 (the
+# default), and referenced as the tracked `requirements` file in the
+# Moonraker Update Manager registration so that both base and hardware
+# dependencies are reinstalled automatically when either file changes.
+-r requirements.txt
+-r requirements-hardware.txt

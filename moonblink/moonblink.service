@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/moonblink
-ExecStart=/usr/bin/python3 -m moonblink.main --config /home/pi/printer_data/config/moonblink.yaml
+ExecStart=/home/pi/moonblink/.venv/bin/python3 -m moonblink.main --config /home/pi/printer_data/config/moonblink.yaml
 Restart=on-failure
 RestartSec=5
 
