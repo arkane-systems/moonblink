@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +18,8 @@ except ImportError:  # pragma: no cover - optional dependency
     aiohttp = None
 
 from .state import PrinterState
+
+logger = logging.getLogger(__name__)
 
 StateHandler = Callable[[PrinterState], Awaitable[None] | None]
 
@@ -39,21 +42,35 @@ class MoonrakerConnector:
     _stop_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
 
     async def start(self) -> None:
+        logger.info(
+            "moonraker: starting connector (websocket=%s rest=%s)",
+            self.config.websocket_url,
+            self.config.rest_url,
+        )
+        if aiohttp is None:
+            logger.warning(
+                "moonraker: 'aiohttp' is not installed; falling back to REST-only polling "
+                "every %.1fs (no realtime websocket updates, install the base requirements "
+                "to enable it)",
+                self.config.poll_interval,
+            )
         await self.refresh_snapshot()
         await self._run_forever()
 
     def stop(self) -> None:
+        logger.info("moonraker: stopping connector")
         self._stop_event.set()
 
     async def refresh_snapshot(self) -> None:
         try:
             payload = await asyncio.to_thread(self._fetch_snapshot)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
             # Network failures (OSError, including urllib's URLError/timeout
             # subclasses) or malformed JSON responses (ValueError, including
             # json.JSONDecodeError) shouldn't crash the connector -- REST
             # snapshots are a best-effort sanity check, retried on the next
             # poll/reconnect.
+            logger.warning("moonraker: REST snapshot request failed: %s", exc)
             return
 
         result = payload.get("result", payload)
@@ -61,6 +78,9 @@ class MoonrakerConnector:
         if isinstance(status, dict):
             self._apply_snapshot(status)
             await self._notify()
+            logger.debug("moonraker: REST snapshot applied")
+        else:
+            logger.warning("moonraker: REST snapshot response had no usable 'status' payload")
 
     def _fetch_snapshot(self) -> dict[str, Any]:
         query = urlencode({name: "" for name in self.config.objects})
@@ -74,8 +94,9 @@ class MoonrakerConnector:
             try:
                 await self._ws_session()
                 delay = self.config.reconnect_delay
-            except Exception:  # noqa: BLE001 - top-level reconnect loop: any failure (network,
+            except Exception as exc:  # noqa: BLE001 - top-level reconnect loop: any failure (network,
                 # protocol, or otherwise) must trigger backoff+retry rather than crash the service.
+                logger.warning("moonraker: connection lost/failed (%s); retrying in %.1fs", exc, delay)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self.config.max_reconnect_delay)
 
@@ -86,7 +107,9 @@ class MoonrakerConnector:
             return
 
         async with aiohttp.ClientSession() as session, session.ws_connect(self.config.websocket_url, heartbeat=20) as ws:
+            logger.info("moonraker: websocket connected to %s", self.config.websocket_url)
             await self._subscribe(ws)
+            logger.debug("moonraker: subscribed to objects: %s", ", ".join(self.config.objects))
             poll_task = asyncio.create_task(self._poll_loop())
             try:
                 async for message in ws:
@@ -94,10 +117,13 @@ class MoonrakerConnector:
                         break
                     if message.type == aiohttp.WSMsgType.TEXT:
                         self._handle_message(message.data)
+                    elif message.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE):
+                        logger.warning("moonraker: websocket closed/errored (message type=%s)", message.type)
             finally:
                 poll_task.cancel()
                 with contextlib.suppress(Exception):
                     await poll_task
+                logger.info("moonraker: websocket session ended")
 
     async def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -144,6 +170,8 @@ class MoonrakerConnector:
             text = params.get("response") or params.get("message") or ""
             if text:
                 self.state.update_from_gcode_response(str(text))
+        elif method:
+            logger.debug("moonraker: unhandled message method=%s", method)
 
     def _apply_snapshot(self, status: dict[str, Any]) -> None:
         self.state.update_from_status(status)

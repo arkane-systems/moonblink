@@ -10,6 +10,9 @@ WorkingDirectory=/home/pi/moonblink
 ExecStart=/home/pi/moonblink/.venv/bin/python3 -m moonblink.main --config /home/pi/printer_data/config/moonblink.yaml
 Restart=on-failure
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=moonblink
 
 [Install]
 WantedBy=multi-user.target

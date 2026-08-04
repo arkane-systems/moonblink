@@ -122,7 +122,7 @@ using the same environment:
 .venv/bin/python3 -m moonblink.main --config config/moonblink.yaml
 ```
 
-### Manual testing without Moonraker or hardware
+### Manual testing with or without hardware
 
 ```bash
 .venv/bin/python3 -m moonblink.main --simulate
@@ -134,5 +134,37 @@ dependencies into, e.g. plain `python3` after `pip install -e .`.)
 
 `--simulate` cycles through a built-in demo sequence (idle → printing →
 layer-change flash → paused → filament runout alert → acknowledge → resume
-→ critical thermal-runaway error → idle) using a no-op LED driver, so the
-full rendering/priority/animation pipeline can be exercised on any machine.
+→ critical thermal-runaway error → idle). It automatically drives the real
+Blinkt! strip if one is detected (letting you exercise the full
+rendering/animation/hardware pipeline end-to-end on the printer itself),
+and falls back to a no-op driver if it isn't (e.g. on a dev machine) --
+either way, every rendering *mode* transition is logged to the console so
+the sequence stays visible without a strip attached, or over SSH. Run with
+`--log-level debug` to additionally see every raw pixel value written to
+the driver (useful for confirming the console echo matches actual hardware
+output).
+
+### Logging
+
+Moonblink logs to stdout with a systemd/journald-friendly format (no
+timestamp -- journald adds its own). Control verbosity with `--log-level`
+(`debug`, `info` [default], `warning`, `error`, or `critical`):
+
+```bash
+.venv/bin/python3 -m moonblink.main --config config/moonblink.yaml --log-level debug
+```
+
+When running as the installed systemd service, view logs with:
+
+```bash
+journalctl -u moonblink -f
+```
+
+(the unit sets `SyslogIdentifier=moonblink`, so `journalctl -t moonblink -f`
+also works). At the default `info` level you'll see connection state to
+Moonraker (websocket connect/disconnect, REST snapshot failures, reconnect
+backoff), local control API requests (`/ack`, `/brightness`,
+`/test-pattern`), and rendering mode transitions -- useful for confirming
+the service is actually talking to Moonraker if the strip appears idle
+unexpectedly. Use `--log-level debug` for finer detail, including every
+unhandled Moonraker message type and raw pixel writes sent to the Blinkt!.

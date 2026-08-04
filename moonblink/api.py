@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -36,11 +39,13 @@ class _RequestHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(raw.decode("utf-8") or "{}")
         except json.JSONDecodeError:
+            logger.warning("api: invalid JSON body for %s", self.path)
             _json_response(self, 400, {"error": "invalid-json"})
             return
 
         if self.path == "/ack":
             alert_id = str(payload.get("alert_id", ""))
+            logger.info("api: acknowledging alert '%s'", alert_id)
             if self.callbacks.ack is not None:
                 self.callbacks.ack(alert_id)
             _json_response(self, 200, {"ok": True, "alert_id": alert_id})
@@ -48,6 +53,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
         if self.path == "/brightness":
             level = float(payload.get("level", 0.0))
+            logger.info("api: setting brightness to %.2f", level)
             if self.callbacks.set_brightness is not None:
                 self.callbacks.set_brightness(level)
             _json_response(self, 200, {"ok": True, "level": level})
@@ -55,6 +61,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
         if self.path == "/test-pattern":
             pattern = str(payload.get("pattern", ""))
+            logger.info("api: applying test pattern '%s'", pattern)
             result = None
             if self.callbacks.test_pattern is not None:
                 result = self.callbacks.test_pattern(pattern)
@@ -63,6 +70,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
             _json_response(self, 200, {"ok": True, "pattern": pattern, "state": result})
             return
 
+        logger.warning("api: request for unknown path '%s'", self.path)
         _json_response(self, 404, {"error": "not-found"})
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -82,6 +90,7 @@ class ControlServer:
         self._server = ThreadingHTTPServer((self.bind_address, self.port), _RequestHandler)
         self._thread = threading.Thread(target=self._server.serve_forever, name="moonblink-api", daemon=True)
         self._thread.start()
+        logger.info("api: control server listening on %s:%d", self.bind_address, self.port)
 
     def stop(self) -> None:
         if self._server is not None:
@@ -89,3 +98,4 @@ class ControlServer:
             self._server.server_close()
         if self._thread is not None:
             self._thread.join(timeout=2)
+        logger.info("api: control server stopped")

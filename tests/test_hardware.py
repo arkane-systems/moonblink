@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import logging
 import sys
 import unittest
 from unittest.mock import patch
 
-from moonblink.animator import AnimationConfig, FrameAnimator, NullBlinktDriver
+from moonblink.animator import AnimationConfig, ConsoleEchoDriver, FrameAnimator, NullBlinktDriver
 from moonblink.renderer import RenderConfig, render_frame
 from moonblink.state import PrinterState
 
@@ -49,6 +50,54 @@ class BlinktHardwareDriverTests(unittest.TestCase):
 
         self.assertIn(("set_clear_on_exit", True), calls)
         self.assertIn(("set_pixel", (0, 255, 0, 0, 0.5)), calls)
+        self.assertIn(("show",), calls)
+        self.assertIn(("clear",), calls)
+
+
+class ConsoleEchoDriverTests(unittest.TestCase):
+    def test_logs_frame_on_show_and_dedupes_unchanged_frames(self) -> None:
+        logger = logging.getLogger("moonblink.test.console-echo")
+        driver = ConsoleEchoDriver(NullBlinktDriver(), log=logger)
+
+        with self.assertLogs(logger, level="DEBUG") as captured:
+            driver.set_pixel(0, 255, 0, 0, 0.5)
+            driver.show()
+            driver.show()  # unchanged frame -- should not log again
+
+        self.assertEqual(len(captured.records), 1)
+        self.assertIn("0=#ff0000@0.50", captured.records[0].message)
+
+    def test_logs_again_when_frame_changes(self) -> None:
+        logger = logging.getLogger("moonblink.test.console-echo-2")
+        driver = ConsoleEchoDriver(NullBlinktDriver(), log=logger)
+
+        with self.assertLogs(logger, level="DEBUG") as captured:
+            driver.set_pixel(0, 255, 0, 0, 0.5)
+            driver.show()
+            driver.set_pixel(0, 0, 255, 0, 0.5)
+            driver.show()
+
+        self.assertEqual(len(captured.records), 2)
+
+    def test_forwards_calls_to_inner_driver(self) -> None:
+        calls: list[tuple] = []
+
+        class RecordingDriver:
+            def set_pixel(self, index, red, green, blue, brightness):
+                calls.append(("set_pixel", index, red, green, blue, brightness))
+
+            def show(self):
+                calls.append(("show",))
+
+            def clear(self):
+                calls.append(("clear",))
+
+        driver = ConsoleEchoDriver(RecordingDriver())
+        driver.set_pixel(1, 10, 20, 30, 0.25)
+        driver.show()
+        driver.clear()
+
+        self.assertIn(("set_pixel", 1, 10, 20, 30, 0.25), calls)
         self.assertIn(("show",), calls)
         self.assertIn(("clear",), calls)
 

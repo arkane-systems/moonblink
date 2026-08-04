@@ -10,6 +10,10 @@ safe -- construction is what fails, loudly and immediately, per the
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class BlinktHardwareError(RuntimeError):
     """Raised when the real Blinkt! hardware/library can't be initialized."""
@@ -34,6 +38,7 @@ class BlinktHardwareDriver:
             raise BlinktHardwareError(f"failed to initialize Blinkt! hardware: {exc}") from exc
 
         self._blinkt = blinkt
+        logger.info("hardware: Blinkt! initialized (clear-on-exit enabled)")
 
     def set_pixel(self, index: int, red: int, green: int, blue: int, brightness: float) -> None:
         self._blinkt.set_pixel(index, red, green, blue, brightness)
