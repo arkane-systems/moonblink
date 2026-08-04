@@ -2,15 +2,67 @@ from __future__ import annotations
 
 import unittest
 
-from moonblink.state import ALERT_CRITICAL, ALERT_WARNING, PRINTER_PRINTING, PrinterState
+from moonblink.state import (
+    ALERT_CRITICAL,
+    ALERT_WARNING,
+    PRINTER_IDLE,
+    PRINTER_PRINTING,
+    USER_EFFECT_PAUSE,
+    USER_EFFECT_RESUME,
+    PrinterState,
+)
 
 
 class StateModelTests(unittest.TestCase):
     def test_status_and_progress_are_normalized(self) -> None:
+        # Real Moonraker shape: a per-object mapping, not flat top-level
+        # "printer_state"/"progress" keys.
         state = PrinterState()
-        state.update_from_status({"printer_state": PRINTER_PRINTING, "progress": 1.5})
+        state.update_from_status({"print_stats": {"state": "printing"}, "display_status": {"progress": 1.5}})
         self.assertEqual(state.printer_mode, PRINTER_PRINTING)
         self.assertEqual(state.progress, 1.0)
+
+    def test_print_stats_state_aliases_are_normalized_to_idle(self) -> None:
+        state = PrinterState()
+        for raw in ("standby", "complete", "cancelled"):
+            state.update_from_status({"print_stats": {"state": raw}})
+            self.assertEqual(state.printer_mode, PRINTER_IDLE, msg=f"{raw!r} should normalize to idle")
+
+    def test_heater_objects_are_recorded_from_status(self) -> None:
+        state = PrinterState()
+        state.update_from_status({"heater_bed": {"temperature": 57.2, "target": 60}, "extruder": {"temperature": 195.0, "target": 200.0}})
+        self.assertEqual(state.temperatures["heater_bed"].actual, 57.2)
+        self.assertEqual(state.temperatures["extruder"].target, 200.0)
+
+    def test_motion_report_live_velocity_drives_motion_active(self) -> None:
+        state = PrinterState()
+        state.update_from_status({"motion_report": {"live_velocity": 45.0}})
+        self.assertTrue(state.motion_active)
+        self.assertEqual(state.motion_velocity, 45.0)
+
+        state.update_from_status({"motion_report": {"live_velocity": 0.0}})
+        self.assertFalse(state.motion_active)
+
+    def test_layer_change_is_detected_from_print_stats_info_diff(self) -> None:
+        state = PrinterState()
+        # The first observed layer just establishes a baseline -- it
+        # shouldn't itself trigger a flash.
+        state.update_from_status({"print_stats": {"state": "printing", "info": {"current_layer": 1}}}, now=0.0)
+        self.assertEqual(state.flash_until, 0.0)
+
+        state.update_from_status({"print_stats": {"state": "printing", "info": {"current_layer": 2}}}, now=10.0)
+        self.assertGreater(state.flash_until, 10.0)
+
+    def test_pause_and_resume_transitions_trigger_user_effect(self) -> None:
+        state = PrinterState()
+        state.update_from_status({"print_stats": {"state": "printing"}}, now=0.0)
+        state.update_from_status({"print_stats": {"state": "paused"}}, now=1.0)
+        self.assertEqual(state.user_effect.kind, USER_EFFECT_PAUSE)
+        self.assertTrue(state.user_effect.active(1.1))
+
+        state.update_from_status({"print_stats": {"state": "printing"}}, now=2.0)
+        self.assertEqual(state.user_effect.kind, USER_EFFECT_RESUME)
+        self.assertTrue(state.user_effect.active(2.1))
 
     def test_temperatures_and_motion_are_recorded(self) -> None:
         state = PrinterState()

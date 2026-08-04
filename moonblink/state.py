@@ -27,6 +27,22 @@ USER_EFFECT_ACK = "ack"
 USER_EFFECT_PAUSE = "pause"
 USER_EFFECT_RESUME = "resume"
 
+# Klipper's real `print_stats.state` values (see
+# https://www.klipper3d.org/Status_Reference.html) don't line up 1:1 with
+# our internal PRINTER_* modes -- "standby"/"complete"/"cancelled" all mean
+# "nothing is actively printing", i.e. our PRINTER_IDLE.
+_PRINTER_MODE_ALIASES = {
+    "standby": PRINTER_IDLE,
+    "complete": PRINTER_IDLE,
+    "cancelled": PRINTER_IDLE,
+}
+
+
+def normalize_printer_mode(raw: str) -> str:
+    """Map a raw Klipper ``print_stats.state`` value onto our PRINTER_* modes."""
+    mode = raw.lower()
+    return _PRINTER_MODE_ALIASES.get(mode, mode)
+
 
 @dataclass(slots=True)
 class TemperatureReading:
@@ -74,8 +90,21 @@ class PrinterState:
     flash_until: float = 0.0
     user_effect: UserEffect = field(default_factory=UserEffect)
 
-    def set_printer_mode(self, mode: str) -> None:
-        self.printer_mode = mode or PRINTER_IDLE
+    def set_printer_mode(self, mode: str, *, now: float | None = None) -> None:
+        mode = mode or PRINTER_IDLE
+        previous = self.printer_mode
+        if mode != previous:
+            # Spec priority 6 ("user interactions") calls for a short pulse
+            # whenever a print is paused or resumed -- and that should hold
+            # regardless of *who* triggered the pause/resume (physical
+            # button, Mainsail/Fluidd, or our own control API), so it's
+            # detected here from the raw mode transition rather than
+            # requiring every caller to remember to call set_user_effect.
+            if previous == PRINTER_PRINTING and mode == PRINTER_PAUSED:
+                self.set_user_effect(USER_EFFECT_PAUSE, now=now)
+            elif previous == PRINTER_PAUSED and mode == PRINTER_PRINTING:
+                self.set_user_effect(USER_EFFECT_RESUME, now=now)
+        self.printer_mode = mode
 
     def set_progress(self, progress: float | None, elapsed: float | None = None, remaining: float | None = None) -> None:
         if progress is not None:
@@ -201,22 +230,62 @@ class PrinterState:
             else:
                 self.clear_alert(alert_id)
 
-    def update_from_status(self, payload: dict[str, Any]) -> None:
-        state = payload.get("state") or payload.get("printer_state") or payload.get("status")
-        if isinstance(state, str):
-            self.set_printer_mode(state.lower())
+    def update_from_status(self, payload: dict[str, Any], *, now: float | None = None) -> None:
+        """Apply a Moonraker printer-object status payload.
 
-        progress = payload.get("progress")
-        if progress is None:
-            stats = payload.get("print_stats")
-            if isinstance(stats, dict):
-                progress = stats.get("progress")
-                if stats.get("state"):
-                    self.set_printer_mode(str(stats["state"]).lower())
-                self.set_progress(progress, elapsed=stats.get("print_duration"), remaining=stats.get("remaining"))
-                return
+        ``payload`` is the raw ``{object_name: {field: value, ...}, ...}``
+        mapping Moonraker uses both for ``notify_status_update`` websocket
+        notifications (``params[0]``) and for
+        ``GET /printer/objects/query`` REST responses (``result.status``),
+        so this single method is the one true translation of "what did
+        Moonraker just tell us" into our normalized state, regardless of
+        which transport delivered it.
+        """
+        now = time.monotonic() if now is None else now
 
-        self.set_progress(progress, elapsed=payload.get("elapsed"), remaining=payload.get("remaining"))
+        print_stats = payload.get("print_stats")
+        if isinstance(print_stats, dict):
+            state = print_stats.get("state")
+            if isinstance(state, str):
+                self.set_printer_mode(normalize_printer_mode(state), now=now)
+
+            if "print_duration" in print_stats:
+                self.elapsed = print_stats.get("print_duration")
+
+            info = print_stats.get("info")
+            current_layer = info.get("current_layer") if isinstance(info, dict) else None
+            # `current_layer` is only populated by a `SET_PRINT_STATS_INFO`
+            # gcode macro (or estimated by a UI), so it may legitimately be
+            # absent/None throughout a print -- only react when it actually
+            # changes, and don't flash for the very first value observed
+            # (that's "we just started tracking layers", not "a layer
+            # change just happened").
+            if isinstance(current_layer, int) and current_layer != self.last_layer:
+                if self.last_layer is None:
+                    self.last_layer = current_layer
+                else:
+                    self.update_from_layer_change({"layer": current_layer}, now=now)
+
+        display_status = payload.get("display_status")
+        if isinstance(display_status, dict) and "progress" in display_status:
+            self.set_progress(display_status.get("progress"), elapsed=self.elapsed, remaining=self.remaining)
+
+        motion_report = payload.get("motion_report")
+        if isinstance(motion_report, dict) and "live_velocity" in motion_report:
+            velocity = motion_report.get("live_velocity") or 0.0
+            self.update_from_motion({"active": velocity > 0.5, "velocity": velocity})
+
+        # Any other subscribed object exposing `temperature` (heater_bed,
+        # extruder, extruder1, ...) is treated as a heater reading -- this
+        # covers whichever heaters the connector is actually configured to
+        # subscribe to without hardcoding their names here.
+        heaters = {
+            name: value
+            for name, value in payload.items()
+            if name not in {"print_stats", "display_status", "motion_report"} and isinstance(value, dict) and "temperature" in value
+        }
+        if heaters:
+            self.update_from_temperature(heaters)
 
     def update_from_temperature(self, payload: dict[str, Any]) -> None:
         for name, value in payload.items():

@@ -31,7 +31,12 @@ class MoonrakerConfig:
     poll_interval: float = 5.0
     reconnect_delay: float = 2.0
     max_reconnect_delay: float = 30.0
-    objects: tuple[str, ...] = ("print_stats", "toolhead", "heater_bed", "display_status")
+    # `motion_report` (not `toolhead`) is the object that actually carries
+    # real-time velocity (`live_velocity`); `display_status` carries print
+    # progress (`toolhead` has neither). `heater_bed`/`extruder` are the
+    # common default heaters -- add any additional heaters (extruder1,
+    # heater_generic chamber, ...) your printer defines via config.
+    objects: tuple[str, ...] = ("print_stats", "display_status", "heater_bed", "extruder", "motion_report")
 
 
 @dataclass(slots=True)
@@ -149,36 +154,36 @@ class MoonrakerConnector:
         if not isinstance(payload, dict):
             return
 
-        method = payload.get("method") or payload.get("event") or payload.get("notification")
-        params = payload.get("params") or payload.get("result") or {}
-        if isinstance(params, list) and params:
-            params = params[0]
-        if not isinstance(params, dict):
-            params = {}
+        method = payload.get("method")
+        params = payload.get("params")
 
-        if method in {"notify_status_update", "status_update"}:
-            self.state.update_from_status(params)
-        elif method in {"notify_print_progress", "print_progress"}:
-            self.state.set_progress(params.get("progress"), elapsed=params.get("elapsed"), remaining=params.get("remaining"))
-        elif method in {"notify_temperature_update", "temperature_update"}:
-            self.state.update_from_temperature(params)
-        elif method in {"notify_motion_update", "motion_update"}:
-            self.state.update_from_motion(params)
-        elif method in {"notify_layer_change", "layer_change"}:
-            self.state.update_from_layer_change(params)
-        elif method in {"notify_gcode_response", "gcode_response"}:
-            text = params.get("response") or params.get("message") or ""
-            if text:
-                self.state.update_from_gcode_response(str(text))
+        if method == "notify_status_update":
+            # Real shape: params == [status_dict, eventtime].
+            status = params[0] if isinstance(params, list) and params else None
+            if isinstance(status, dict):
+                self.state.update_from_status(status)
+            else:
+                logger.warning("moonraker: notify_status_update had no usable status payload")
+        elif method == "notify_gcode_response":
+            # Real shape: params == [response_text].
+            text = params[0] if isinstance(params, list) and params else None
+            if isinstance(text, str) and text:
+                self.state.update_from_gcode_response(text)
         elif method:
-            logger.debug("moonraker: unhandled message method=%s", method)
+            logger.debug("moonraker: unhandled notification method=%s", method)
+        elif "result" in payload and payload.get("id") is not None:
+            # The reply to our `printer.objects.subscribe` request carries
+            # an initial status snapshot -- applying it means we don't have
+            # to wait for the next REST poll or notification to reflect
+            # current state after (re)connecting.
+            result = payload["result"]
+            status = result.get("status") if isinstance(result, dict) else None
+            if isinstance(status, dict):
+                self.state.update_from_status(status)
+                logger.debug("moonraker: applied subscribe response snapshot")
 
     def _apply_snapshot(self, status: dict[str, Any]) -> None:
         self.state.update_from_status(status)
-        if "temperature" in status and isinstance(status["temperature"], dict):
-            self.state.update_from_temperature(status["temperature"])
-        if "toolhead" in status and isinstance(status["toolhead"], dict):
-            self.state.update_from_motion(status["toolhead"])
 
     async def _notify(self) -> None:
         if self.on_state_change is None:

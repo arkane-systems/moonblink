@@ -6,20 +6,43 @@ A compact Python service that connects to Moonraker/Klipper on a Raspberry Pi an
 
 ## Data sources (Moonraker / Klipper)
 
+> **Corrected from the original spec draft**: Moonraker only ever emits two
+> websocket notification methods relevant here --
+> `notify_status_update` and `notify_gcode_response`. There is no
+> `notify_print_progress`, `notify_temperature_update`, `notify_motion_update`,
+> or `notify_layer_change` method -- progress, temperatures, motion, and
+> layer changes are all delivered as fields on the *subscribed printer
+> objects* inside `notify_status_update`, not as separate event types.
+
 Primary (real-time) — WebSocket events
 
- * `notify_status_update` — printer state changes (printing, paused, idle, error).
- * `notify_gcode_response` / `gcode_response` — last gcode responses and errors.
- * `notify_print_progress` / `print_stats` events — progress updates, elapsed/remaining.
- * `notify_temperature_update` — heater actual/target updates (hotend(s), bed).
- * `notify_motion_update` or `toolhead` position events — motion/velocity (if available).
- * `notify_layer_change` or `print_stats` layer info — layer change events (timelapse sync).
+ * `notify_status_update` — a single event carrying updated fields for every
+   subscribed printer object, e.g. `{"print_stats": {...}, "display_status":
+   {...}, "heater_bed": {...}, "extruder": {...}, "motion_report": {...}}`.
+   This one event is the source for all of:
+   * printer state changes: `print_stats.state` (`standby`, `printing`,
+     `paused`, `complete`, `error`, `cancelled` — `standby`/`complete`/
+     `cancelled` are normalized to our internal `idle` mode).
+   * print progress/elapsed: `display_status.progress` (0.0–1.0) and
+     `print_stats.print_duration` (`virtual_sdcard.progress` is an
+     equivalent alternative progress source if `virtual_sdcard` is
+     subscribed instead).
+   * heater actual/target updates: any subscribed heater object's
+     `temperature`/`target` fields (e.g. `heater_bed`, `extruder`).
+   * motion/velocity: `motion_report.live_velocity` (`toolhead` itself has
+     no real-time velocity field).
+   * layer changes (timelapse sync): there is no dedicated layer-change
+     event — detect it by diffing `print_stats.info.current_layer` across
+     successive `notify_status_update` events (only populated if the
+     gcode/slicer emits `SET_PRINT_STATS_INFO CURRENT_LAYER=`, or if
+     estimated by a UI).
+ * `notify_gcode_response` — last gcode responses and errors, `params ==
+   [response_text]`.
 
 ## Secondary (periodic) — REST endpoints
 
-* `GET /printer/objects/query` — query print_stats, heater, toolhead, power, display_status.
+* `GET /printer/objects/query?print_stats&display_status&heater_bed&extruder&motion_report` — same per-object status shape as `notify_status_update`, used for the initial snapshot and periodic sanity polling.
 * `GET /printer/objects/list` — for available objects and fields.
-* `GET /printer/objects/print_job` — file name, progress, times.
 * System endpoints for Pi CPU/temperature (optional) if available.
 
 **Why both:** WebSocket for instant events (layer change, errors, motion), REST for occasional sanity checks and initial state.

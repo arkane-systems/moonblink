@@ -1,6 +1,6 @@
 moonraker:
-  url: ws://127.0.0.1/websocket
-  rest_url: http://127.0.0.1
+  url: ws://127.0.0.1:7125/websocket
+  rest_url: http://127.0.0.1:7125
 
 api:
   bind_address: 127.0.0.1
