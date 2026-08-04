@@ -1,6 +1,3 @@
-PREFIX ?= /usr/local
-BINDIR ?= $(PREFIX)/bin
-SHAREDIR ?= $(PREFIX)/share/moonblink
 SYSTEMD_DIR ?= /etc/systemd/system
 CONFIG_DIR ?= /home/pi/printer_data/config
 UPDATE_MANAGER_DIR ?= /home/pi/printer_data/config/moonraker.conf.d
@@ -14,9 +11,7 @@ ENABLE_UPDATE_MANAGER ?= 0
 .PHONY: install uninstall reload update-manager-install update-manager-uninstall lint test
 
 install:
-	install -d "$(DESTDIR)$(SHAREDIR)" "$(DESTDIR)$(BINDIR)" "$(DESTDIR)$(SYSTEMD_DIR)"
-	install -m 644 README.md SPEC.md AGENTS.md "$(DESTDIR)$(SHAREDIR)/"
-	install -m 644 config/moonblink.yaml "$(DESTDIR)$(SHAREDIR)/moonblink.yaml"
+	install -d "$(DESTDIR)$(SYSTEMD_DIR)"
 	install -m 644 moonblink/moonblink.service "$(DESTDIR)$(SYSTEMD_DIR)/$(SERVICE_NAME).service"
 	install -d "$(DESTDIR)$(CONFIG_DIR)"
 	install -m 644 config/moonblink.yaml "$(DESTDIR)$(CONFIG_DIR)/moonblink.yaml"
@@ -24,7 +19,6 @@ install:
 
 uninstall:
 	rm -f "$(DESTDIR)$(SYSTEMD_DIR)/$(SERVICE_NAME).service"
-	rm -rf "$(DESTDIR)$(SHAREDIR)"
 	rm -f "$(DESTDIR)$(CONFIG_DIR)/moonblink.yaml"
 	if [ "$(ENABLE_UPDATE_MANAGER)" = "1" ]; then $(MAKE) update-manager-uninstall; fi
 
