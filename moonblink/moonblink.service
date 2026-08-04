@@ -1,0 +1,16 @@
+[Unit]
+Description=Moonblink Blinkt status service
+After=network-online.target moonraker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/moonblink
+ExecStart=/usr/bin/python3 -m moonblink.main --config /home/pi/printer_data/config/moonblink.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
