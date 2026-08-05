@@ -34,6 +34,7 @@ class RenderConfig:
     flash_duration_ms: int = 300
     update_rate_hz: int = 15
     disable_layer_flash: bool = False
+    calm_when_idle: bool = True
     reverse_progress_fill: bool = False
     progress_start_color: RGB = CYAN
     progress_end_color: RGB = MAGENTA
@@ -155,9 +156,10 @@ def render_frame(state: PrinterState, config: RenderConfig, now: float | None = 
             pixels[pixel_index] = _blend_color(config.progress_start_color, config.progress_end_color, index / 5 if 5 else 0.0)
     elif state.printer_mode == PRINTER_IDLE:
         pixels[0] = config.idle_color
-        breathe = _pulse(now, period=3.0, minimum=0.08, maximum=0.22)
-        for index in range(1, 7):
-            pixels[index] = _scale_color(config.idle_color, breathe * (0.7 if index % 2 else 0.4))
+        if not config.calm_when_idle:
+            breathe = _pulse(now, period=3.0, minimum=0.08, maximum=0.22)
+            for index in range(1, 7):
+                pixels[index] = _scale_color(config.idle_color, breathe * (0.7 if index % 2 else 0.4))
     else:
         pixels[0] = config.idle_color
 

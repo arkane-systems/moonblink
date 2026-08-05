@@ -12,6 +12,16 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(frame.mode, PRINTER_IDLE)
         self.assertEqual(frame.pixels[0], (0, 0, 255))
 
+    def test_idle_is_calm_by_default_on_pixels_one_through_six(self) -> None:
+        frame = render_frame(PrinterState(printer_mode=PRINTER_IDLE), RenderConfig(), now=0.0)
+        self.assertEqual(frame.pixels[0], (0, 0, 255))
+        self.assertEqual(frame.pixels[1:7], ((0, 0, 0),) * 6)
+
+    def test_idle_breathing_can_be_reenabled_with_config(self) -> None:
+        frame = render_frame(PrinterState(printer_mode=PRINTER_IDLE), RenderConfig(calm_when_idle=False), now=0.0)
+        self.assertEqual(frame.pixels[0], (0, 0, 255))
+        self.assertTrue(any(pixel != (0, 0, 0) for pixel in frame.pixels[1:7]))
+
     def test_printing_renders_progress_and_motion(self) -> None:
         state = PrinterState(printer_mode=PRINTER_PRINTING, progress=0.5, motion_active=True)
         frame = render_frame(state, RenderConfig(), now=1.0)

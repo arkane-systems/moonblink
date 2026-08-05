@@ -12,6 +12,7 @@ class ConfigParsingTests(unittest.TestCase):
         self.assertEqual(config.api_bind_address, "127.0.0.1")
         self.assertEqual(config.api_port, 8765)
         self.assertEqual(config.render.brightness_max, 0.35)
+        self.assertTrue(config.render.calm_when_idle)
         self.assertFalse(config.night_mode.enabled)
 
     def test_full_valid_document_is_parsed(self) -> None:
@@ -21,6 +22,7 @@ class ConfigParsingTests(unittest.TestCase):
             "brightness_max": 0.5,
             "update_rate_hz": 10,
             "flash_duration_ms": 250,
+            "calm_when_idle": False,
             "reverse_progress_fill": True,
             "critical_alert_escalate_after_s": 45,
             "colors": {"printing": [1, 2, 3]},
@@ -31,6 +33,7 @@ class ConfigParsingTests(unittest.TestCase):
         self.assertEqual(config.moonraker.websocket_url, "ws://printer/websocket")
         self.assertEqual(config.api_port, 9000)
         self.assertEqual(config.render.brightness_max, 0.5)
+        self.assertFalse(config.render.calm_when_idle)
         self.assertTrue(config.render.reverse_progress_fill)
         self.assertEqual(config.render.printing_color, (1, 2, 3))
         self.assertEqual(config.render.critical_alert_escalate_after_s, 45)
@@ -61,6 +64,10 @@ class ConfigParsingTests(unittest.TestCase):
     def test_reverse_progress_fill_must_be_boolean(self) -> None:
         with self.assertRaises(ConfigError):
             parse_config({"reverse_progress_fill": "yes"})
+
+    def test_calm_when_idle_must_be_boolean(self) -> None:
+        with self.assertRaises(ConfigError):
+            parse_config({"calm_when_idle": "no"})
 
     def test_critical_below_warning_threshold_raises(self) -> None:
         with self.assertRaises(ConfigError):

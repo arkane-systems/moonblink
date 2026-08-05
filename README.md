@@ -100,6 +100,8 @@ available options, including:
 * `moonraker` — WebSocket/REST URLs.
 * `api` — local control API bind address/port.
 * `brightness_max`, `update_rate_hz`, `flash_duration_ms` — rendering/animation limits.
+* `calm_when_idle` — when `true` (default), idle mode keeps pixels 1..6 off
+  for a quieter look; when `false`, idle breathing on pixels 1..6 is enabled.
 * `reverse_progress_fill` — flips the progress bar direction across pixels
   1..6 (pixels 0 and 7 remain the mode/alert indicators).
 * motion spark — when motion is active during printing, the spark now
