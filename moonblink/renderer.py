@@ -75,7 +75,7 @@ def _blink_on(now: float, period: float = 0.5, duty: float = 0.5) -> bool:
     return phase < duty
 
 
-def _spark_index(now: float, width: int = 6, speed: float = 2.0) -> int:
+def _spark_index(now: float, width: int = 6, speed: float = 4.0) -> int:
     return int(now * speed) % max(1, width)
 
 
