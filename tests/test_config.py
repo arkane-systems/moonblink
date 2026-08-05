@@ -21,6 +21,7 @@ class ConfigParsingTests(unittest.TestCase):
             "brightness_max": 0.5,
             "update_rate_hz": 10,
             "flash_duration_ms": 250,
+            "reverse_progress_fill": True,
             "critical_alert_escalate_after_s": 45,
             "colors": {"printing": [1, 2, 3]},
             "temp_thresholds": {"warning_c": 4, "critical_c": 12, "progress_min_change_c": 0.3, "progress_stall_s": 12},
@@ -30,6 +31,7 @@ class ConfigParsingTests(unittest.TestCase):
         self.assertEqual(config.moonraker.websocket_url, "ws://printer/websocket")
         self.assertEqual(config.api_port, 9000)
         self.assertEqual(config.render.brightness_max, 0.5)
+        self.assertTrue(config.render.reverse_progress_fill)
         self.assertEqual(config.render.printing_color, (1, 2, 3))
         self.assertEqual(config.render.critical_alert_escalate_after_s, 45)
         self.assertEqual(config.temp_thresholds.warning_c, 4)
@@ -55,6 +57,10 @@ class ConfigParsingTests(unittest.TestCase):
     def test_invalid_night_mode_time_raises(self) -> None:
         with self.assertRaises(ConfigError):
             parse_config({"night_mode": {"start": "not-a-time"}})
+
+    def test_reverse_progress_fill_must_be_boolean(self) -> None:
+        with self.assertRaises(ConfigError):
+            parse_config({"reverse_progress_fill": "yes"})
 
     def test_critical_below_warning_threshold_raises(self) -> None:
         with self.assertRaises(ConfigError):

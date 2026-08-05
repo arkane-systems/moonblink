@@ -19,6 +19,40 @@ class RendererTests(unittest.TestCase):
         self.assertNotEqual(frame.pixels[1], (0, 0, 0))
         self.assertTrue(any(max(pixel) >= 200 for pixel in frame.pixels))
 
+    def test_reverse_progress_fill_lights_from_pixel_six_toward_one(self) -> None:
+        state = PrinterState(printer_mode=PRINTER_PRINTING, progress=0.5)
+        frame = render_frame(state, RenderConfig(reverse_progress_fill=True), now=1.0)
+        self.assertEqual(frame.pixels[0], (0, 255, 0))
+        self.assertNotEqual(frame.pixels[6], (0, 0, 0))
+        self.assertEqual(frame.pixels[1], (0, 0, 0))
+
+    def test_reverse_progress_fill_applies_to_paused_mode(self) -> None:
+        state = PrinterState(printer_mode=PRINTER_PAUSED, progress=0.5)
+        frame = render_frame(state, RenderConfig(reverse_progress_fill=True), now=1.0)
+        self.assertEqual(frame.pixels[0], (255, 255, 0))
+        self.assertNotEqual(frame.pixels[6], (0, 0, 0))
+        self.assertEqual(frame.pixels[1], (0, 0, 0))
+
+    def test_reverse_progress_fill_does_not_change_pixel_zero_or_seven_roles(self) -> None:
+        state = PrinterState(printer_mode=PRINTER_PAUSED, progress=0.5)
+        state.add_alert("warn", kind="heater", severity=ALERT_WARNING)
+        frame = render_frame(state, RenderConfig(reverse_progress_fill=True), now=1.0)
+        self.assertEqual(frame.pixels[0], (255, 255, 0))
+        self.assertNotEqual(frame.pixels[7], (0, 0, 0))
+
+    def test_motion_spark_ping_pongs_instead_of_wrapping(self) -> None:
+        state = PrinterState(printer_mode=PRINTER_PRINTING, progress=1.0, motion_active=True)
+        config = RenderConfig()
+
+        # Forward sweep to the far end.
+        to_end = render_frame(state, config, now=1.25)
+        self.assertEqual(to_end.pixels[6], (230, 230, 230))
+
+        # Then it should move back instead of jumping to pixel 1.
+        returning = render_frame(state, config, now=1.5)
+        self.assertEqual(returning.pixels[5], (230, 230, 230))
+        self.assertNotEqual(returning.pixels[1], (230, 230, 230))
+
     def test_warning_alert_uses_indicator_pixel(self) -> None:
         state = PrinterState(printer_mode=PRINTER_PAUSED)
         state.add_alert("warn", kind="heater", severity=ALERT_WARNING)

@@ -100,6 +100,10 @@ available options, including:
 * `moonraker` — WebSocket/REST URLs.
 * `api` — local control API bind address/port.
 * `brightness_max`, `update_rate_hz`, `flash_duration_ms` — rendering/animation limits.
+* `reverse_progress_fill` — flips the progress bar direction across pixels
+  1..6 (pixels 0 and 7 remain the mode/alert indicators).
+* motion spark — when motion is active during printing, the spark now
+  sweeps back-and-forth across pixels 1..6 rather than wrapping abruptly.
 * `critical_alert_escalate_after_s` — how long a critical *alert* (e.g.
   filament runout) can go unacknowledged before it escalates from a
   pixel-7 blink to a full-strip strobe. `printer_mode == error` (thermal

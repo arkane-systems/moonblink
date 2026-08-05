@@ -9,6 +9,7 @@ api:
 brightness_max: 0.35
 update_rate_hz: 15
 flash_duration_ms: 300
+reverse_progress_fill: false
 critical_alert_escalate_after_s: 30
 
 colors:

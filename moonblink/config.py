@@ -31,6 +31,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "brightness_max",
     "update_rate_hz",
     "flash_duration_ms",
+    "reverse_progress_fill",
     "critical_alert_escalate_after_s",
     "colors",
     "temp_thresholds",
@@ -182,6 +183,9 @@ def parse_config(document: dict[str, Any]) -> MoonblinkConfig:
         "critical_alert_escalate_after_s",
         minimum=0.0,
     )
+    reverse_progress_fill = document.get("reverse_progress_fill", render_defaults.reverse_progress_fill)
+    if not isinstance(reverse_progress_fill, bool):
+        raise ConfigError("'reverse_progress_fill' must be a boolean")
 
     colors = document.get("colors", {})
     if colors:
@@ -205,6 +209,7 @@ def parse_config(document: dict[str, Any]) -> MoonblinkConfig:
         brightness_max=brightness_max,
         flash_duration_ms=flash_duration_ms,
         update_rate_hz=int(update_rate_hz),
+        reverse_progress_fill=reverse_progress_fill,
         critical_alert_escalate_after_s=escalate_after_s,
     )
 

@@ -34,6 +34,7 @@ class RenderConfig:
     flash_duration_ms: int = 300
     update_rate_hz: int = 15
     disable_layer_flash: bool = False
+    reverse_progress_fill: bool = False
     progress_start_color: RGB = CYAN
     progress_end_color: RGB = MAGENTA
     critical_alert_escalate_after_s: float = 30.0
@@ -76,7 +77,19 @@ def _blink_on(now: float, period: float = 0.5, duty: float = 0.5) -> bool:
 
 
 def _spark_index(now: float, width: int = 6, speed: float = 4.0) -> int:
-    return int(now * speed) % max(1, width)
+    width = max(1, width)
+    if width == 1:
+        return 0
+
+    # Traverse forward then backward so motion appears continuous instead
+    # of wrapping abruptly back to the first progress pixel.
+    span = 2 * (width - 1)
+    phase = int(now * speed) % span
+    return phase if phase < width else span - phase
+
+
+def _progress_pixel(index: int, *, reverse: bool) -> int:
+    return 6 - index if reverse else index + 1
 
 
 def render_frame(state: PrinterState, config: RenderConfig, now: float | None = None) -> RenderedFrame:
@@ -123,12 +136,13 @@ def render_frame(state: PrinterState, config: RenderConfig, now: float | None = 
         whole = int(fill)
         fractional = fill - whole
         for index in range(6):
+            pixel_index = _progress_pixel(index, reverse=config.reverse_progress_fill)
             if index < whole:
                 t = index / 5 if 5 else 0.0
-                pixels[index + 1] = _blend_color(config.progress_start_color, config.progress_end_color, t)
+                pixels[pixel_index] = _blend_color(config.progress_start_color, config.progress_end_color, t)
             elif index == whole and fractional > 0:
                 base = _blend_color(config.progress_start_color, config.progress_end_color, min(1.0, fill / 6.0))
-                pixels[index + 1] = _scale_color(base, max(0.15, fractional))
+                pixels[pixel_index] = _scale_color(base, max(0.15, fractional))
         if state.motion_active:
             spark = 1 + _spark_index(now, width=6)
             pixels[spark] = _scale_color(WHITE, 0.9)
@@ -137,7 +151,8 @@ def render_frame(state: PrinterState, config: RenderConfig, now: float | None = 
         pixels[0] = config.paused_color
         fill = round(_clamp(state.progress) * 6.0)
         for index in range(fill):
-            pixels[index + 1] = _blend_color(config.progress_start_color, config.progress_end_color, index / 5 if 5 else 0.0)
+            pixel_index = _progress_pixel(index, reverse=config.reverse_progress_fill)
+            pixels[pixel_index] = _blend_color(config.progress_start_color, config.progress_end_color, index / 5 if 5 else 0.0)
     elif state.printer_mode == PRINTER_IDLE:
         pixels[0] = config.idle_color
         breathe = _pulse(now, period=3.0, minimum=0.08, maximum=0.22)
