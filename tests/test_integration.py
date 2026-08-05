@@ -69,14 +69,29 @@ class IntegrationFlowTests(unittest.TestCase):
         # Progress bar (pixels 1-6): at 50% (3 of 6) some pixels should now
         # be lit with the progress gradient, not left black.
         self.assertTrue(any(pixel != (0, 0, 0) for pixel in frame.pixels[1:7]))
-        # Off-target heater indicator (pixel 7) should be lit (warning).
-        self.assertNotEqual(frame.pixels[7], (0, 0, 0))
+        # Immediately after a target change, off-target heater warnings are
+        # suppressed while temperature is still expected to converge.
+        self.assertEqual(frame.pixels[7], (0, 0, 0))
+
+        connector._handle_message(
+            '{"method":"notify_status_update","params":[{'
+            '"heater_bed":{"temperature":50.0,"target":60.0}'
+            '},21.0]}'
+        )
+        # Use the same monotonic time base that state tracking uses.
+        checkpoint = state.temperatures["heater_bed"].last_progress_at
+        self.assertIsNotNone(checkpoint)
+        state.evaluate_temperature_alerts(warning_c=5.0, critical_c=15.0, now=checkpoint + 11.0)
+        stalled = render_frame(state, RenderConfig(), now=21.0)
+        # Once progress stalls for long enough, normal threshold alerting
+        # resumes and pixel 7 lights again.
+        self.assertNotEqual(stalled.pixels[7], (0, 0, 0))
 
         # A subsequent layer change should trigger the full-strip flash.
         connector._handle_message(
-            '{"method":"notify_status_update","params":[{"print_stats":{"state":"printing","info":{"current_layer":2}}},20.0]}'
+            '{"method":"notify_status_update","params":[{"print_stats":{"state":"printing","info":{"current_layer":2}}},22.0]}'
         )
-        flash = render_frame(state, RenderConfig(), now=20.05)
+        flash = render_frame(state, RenderConfig(), now=22.05)
         self.assertEqual(flash.mode, "flash")
 
 

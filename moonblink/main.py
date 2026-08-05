@@ -77,6 +77,8 @@ class MoonblinkRuntime:
             state.evaluate_temperature_alerts(
                 warning_c=self.config.temp_thresholds.warning_c,
                 critical_c=self.config.temp_thresholds.critical_c,
+                temp_progress_min_change_c=self.config.temp_thresholds.progress_min_change_c,
+                temp_progress_stall_s=self.config.temp_thresholds.progress_stall_s,
             )
             return animator.present(render_frame(state, self._current_render_config()))
 

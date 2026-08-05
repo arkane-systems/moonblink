@@ -48,6 +48,9 @@ def normalize_printer_mode(raw: str) -> str:
 class TemperatureReading:
     actual: float | None = None
     target: float | None = None
+    target_changed_at: float | None = None
+    last_progress_at: float | None = None
+    last_actual_for_progress: float | None = None
 
 
 @dataclass(slots=True)
@@ -112,8 +115,46 @@ class PrinterState:
         self.elapsed = elapsed
         self.remaining = remaining
 
-    def set_temperature(self, name: str, actual: float | None = None, target: float | None = None) -> None:
-        self.temperatures[name] = TemperatureReading(actual=actual, target=target)
+    def set_temperature(self, name: str, actual: float | None = None, target: float | None = None, *, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        previous = self.temperatures.get(name)
+
+        # A heater only participates in alerting/progress tracking while it
+        # has a positive target.
+        active_target = target is not None and target > 0
+
+        if previous is None:
+            self.temperatures[name] = TemperatureReading(
+                actual=actual,
+                target=target,
+                target_changed_at=now if active_target else None,
+                last_progress_at=now if active_target and actual is not None else None,
+                last_actual_for_progress=actual if active_target else None,
+            )
+            return
+
+        target_changed = previous.target != target
+        if not active_target:
+            self.temperatures[name] = TemperatureReading(actual=actual, target=target)
+            return
+
+        if target_changed:
+            self.temperatures[name] = TemperatureReading(
+                actual=actual,
+                target=target,
+                target_changed_at=now,
+                last_progress_at=now if actual is not None else None,
+                last_actual_for_progress=actual,
+            )
+            return
+
+        self.temperatures[name] = TemperatureReading(
+            actual=actual,
+            target=target,
+            target_changed_at=previous.target_changed_at,
+            last_progress_at=previous.last_progress_at,
+            last_actual_for_progress=previous.last_actual_for_progress,
+        )
 
     def set_motion(self, active: bool, velocity: float | None = None) -> None:
         self.motion_active = active
@@ -202,18 +243,63 @@ class PrinterState:
             return 0.0
         return max(alert.magnitude for alert in active)
 
-    def evaluate_temperature_alerts(self, *, warning_c: float, critical_c: float, now: float | None = None) -> None:
+    def evaluate_temperature_alerts(
+        self,
+        *,
+        warning_c: float,
+        critical_c: float,
+        temp_progress_min_change_c: float = 0.2,
+        temp_progress_stall_s: float = 10.0,
+        now: float | None = None,
+    ) -> None:
         """Raise or clear ``heater-<name>`` alerts from recorded temperature readings.
 
         A heater is only evaluated when it has a positive target (i.e. it is
         actively being heated) -- an idle/off heater cooling toward ambient
         should not be flagged as "off-target".
         """
+        now = time.monotonic() if now is None else now
+
         for name, reading in self.temperatures.items():
             alert_id = f"heater-{name}"
             if reading.actual is None or reading.target is None or reading.target <= 0:
                 self.clear_alert(alert_id)
+                reading.target_changed_at = None
+                reading.last_progress_at = None
+                reading.last_actual_for_progress = None
                 continue
+
+            # After any target change, suppress alerts while the reading is
+            # still moving toward the target. If movement stalls long enough,
+            # reopen normal warning/critical threshold evaluation.
+            if reading.target_changed_at is not None:
+                min_progress = max(0.0, temp_progress_min_change_c)
+                reached_target = abs(reading.actual - reading.target) <= min_progress
+                if reached_target:
+                    self.clear_alert(alert_id)
+                    reading.target_changed_at = None
+                    reading.last_progress_at = now
+                    reading.last_actual_for_progress = reading.actual
+                    continue
+
+                if reading.last_actual_for_progress is None:
+                    reading.last_actual_for_progress = reading.actual
+                else:
+                    progress_toward_target = abs(reading.last_actual_for_progress - reading.target) - abs(reading.actual - reading.target)
+                    if progress_toward_target >= min_progress:
+                        reading.last_progress_at = now
+                        reading.last_actual_for_progress = reading.actual
+                        self.clear_alert(alert_id)
+                        continue
+
+                baseline = reading.last_progress_at if reading.last_progress_at is not None else reading.target_changed_at
+                stalled_for = max(0.0, now - baseline)
+                if stalled_for < max(0.0, temp_progress_stall_s):
+                    self.clear_alert(alert_id)
+                    continue
+
+                # Gate expired: resume normal threshold alerts for this target.
+                reading.target_changed_at = None
 
             delta = abs(reading.actual - reading.target)
             if critical_c > 0:
@@ -285,15 +371,16 @@ class PrinterState:
             if name not in {"print_stats", "display_status", "motion_report"} and isinstance(value, dict) and "temperature" in value
         }
         if heaters:
-            self.update_from_temperature(heaters)
+            self.update_from_temperature(heaters, now=now)
 
-    def update_from_temperature(self, payload: dict[str, Any]) -> None:
+    def update_from_temperature(self, payload: dict[str, Any], *, now: float | None = None) -> None:
         for name, value in payload.items():
             if isinstance(value, dict):
                 self.set_temperature(
                     name,
                     actual=value.get("actual") or value.get("temp") or value.get("temperature"),
                     target=value.get("target"),
+                    now=now,
                 )
 
     def update_from_motion(self, payload: dict[str, Any]) -> None:

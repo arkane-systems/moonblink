@@ -22,10 +22,11 @@ colors:
 temp_thresholds:
   warning_c: 5
   critical_c: 15
+  progress_min_change_c: 0.2
+  progress_stall_s: 10
 
 night_mode:
   enabled: false
   dim_to: 0.1
   start: "22:00"
   end: "07:00"
-

@@ -107,7 +107,11 @@ available options, including:
   setting.
 * `colors` — per-state/indicator colors.
 * `temp_thresholds` — `warning_c` / `critical_c` off-target deltas that
-  automatically raise/clear heater alerts from temperature readings.
+  automatically raise/clear heater alerts from temperature readings, plus
+  warmup/cooldown gating controls: `progress_min_change_c` (minimum
+  movement toward target that counts as progress) and `progress_stall_s`
+  (how long progress can stall after a target change before
+  warning/critical alerts are allowed again).
 * `night_mode` — `enabled`, `dim_to`, and a `start`/`end` (`HH:MM`,
   midnight-wrapping) window during which brightness is automatically
   capped.

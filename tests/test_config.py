@@ -23,7 +23,7 @@ class ConfigParsingTests(unittest.TestCase):
             "flash_duration_ms": 250,
             "critical_alert_escalate_after_s": 45,
             "colors": {"printing": [1, 2, 3]},
-            "temp_thresholds": {"warning_c": 4, "critical_c": 12},
+            "temp_thresholds": {"warning_c": 4, "critical_c": 12, "progress_min_change_c": 0.3, "progress_stall_s": 12},
             "night_mode": {"enabled": True, "dim_to": 0.05, "start": "23:00", "end": "06:30"},
         }
         config = parse_config(document)
@@ -34,6 +34,8 @@ class ConfigParsingTests(unittest.TestCase):
         self.assertEqual(config.render.critical_alert_escalate_after_s, 45)
         self.assertEqual(config.temp_thresholds.warning_c, 4)
         self.assertEqual(config.temp_thresholds.critical_c, 12)
+        self.assertEqual(config.temp_thresholds.progress_min_change_c, 0.3)
+        self.assertEqual(config.temp_thresholds.progress_stall_s, 12)
         self.assertTrue(config.night_mode.enabled)
         self.assertEqual(config.night_mode.start, time(23, 0))
         self.assertEqual(config.night_mode.end, time(6, 30))

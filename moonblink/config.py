@@ -44,6 +44,8 @@ _KNOWN_COLOR_KEYS = {"printing", "idle", "paused", "error", "warning", "critical
 class TempThresholds:
     warning_c: float = 5.0
     critical_c: float = 15.0
+    progress_min_change_c: float = 0.2
+    progress_stall_s: float = 10.0
 
 
 @dataclass(slots=True)
@@ -215,14 +217,29 @@ def parse_config(document: dict[str, Any]) -> MoonblinkConfig:
     temp_thresholds = TempThresholds()
     if "temp_thresholds" in document:
         section = _require_mapping(document["temp_thresholds"], "temp_thresholds")
-        unknown_temp = set(section) - {"warning_c", "critical_c"}
+        unknown_temp = set(section) - {"warning_c", "critical_c", "progress_min_change_c", "progress_stall_s"}
         if unknown_temp:
             raise ConfigError(f"unknown temp_thresholds key(s): {', '.join(sorted(unknown_temp))}")
         warning_c = _require_number(section.get("warning_c", temp_thresholds.warning_c), "temp_thresholds.warning_c", minimum=0.0)
         critical_c = _require_number(section.get("critical_c", temp_thresholds.critical_c), "temp_thresholds.critical_c", minimum=0.0)
+        progress_min_change_c = _require_number(
+            section.get("progress_min_change_c", temp_thresholds.progress_min_change_c),
+            "temp_thresholds.progress_min_change_c",
+            minimum=0.0,
+        )
+        progress_stall_s = _require_number(
+            section.get("progress_stall_s", temp_thresholds.progress_stall_s),
+            "temp_thresholds.progress_stall_s",
+            minimum=0.0,
+        )
         if critical_c < warning_c:
             raise ConfigError("'temp_thresholds.critical_c' must be >= 'temp_thresholds.warning_c'")
-        temp_thresholds = TempThresholds(warning_c=warning_c, critical_c=critical_c)
+        temp_thresholds = TempThresholds(
+            warning_c=warning_c,
+            critical_c=critical_c,
+            progress_min_change_c=progress_min_change_c,
+            progress_stall_s=progress_stall_s,
+        )
 
     night_mode = NightMode()
     if "night_mode" in document:
